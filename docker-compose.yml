@@ -1,0 +1,115 @@
+version: '3.7'
+
+volumes:
+    prometheus_data: {}
+    grafana_data: {}
+
+networks:
+  front-tier:
+  back-tier:
+
+services:
+
+  prometheus:
+    image: prom/prometheus:v2.29.1
+    volumes:
+      - ./prometheus/:/etc/prometheus/
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=70d'
+      - '--log.level=debug'
+      - '--web.enable-lifecycle'
+    ports:
+      - 9090:9090
+    links:
+      - cadvisor:cadvisor
+      - alertmanager:alertmanager
+    depends_on:
+      - cadvisor
+
+    networks:
+      - back-tier
+    restart: always
+
+  node-exporter:
+    image: prom/node-exporter:v1.2.2
+    volumes:
+      -  /:/host:ro
+    command: 
+      - '--path.rootfs=/host'
+      - '--path.procfs=/host/proc' 
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points'
+      - "^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)"
+    pid: host
+    ports:
+      - 9100:9100
+    networks:
+      - back-tier
+    restart: always
+    deploy:
+      mode: global
+
+  alertmanager:
+    image: prom/alertmanager:v0.22.2
+    ports:
+      - 9093:9093
+    volumes:
+      - ./alertmanager/:/etc/alertmanager/
+    networks:
+      - back-tier
+    restart: always
+    links: 
+      - prometheus-bot
+    command:
+      - '--config.file=/etc/alertmanager/config.yml'
+      - '--storage.path=/alertmanager'
+
+  cadvisor:
+    image: google/cadvisor:v0.33.0
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - 8080:8080
+    networks:
+      - back-tier
+    restart: always
+    deploy:
+      mode: global
+
+  grafana:
+    image: grafana/grafana
+    user: "472"
+    depends_on:
+      - prometheus
+    ports:
+      - 3000:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+    env_file:
+      - ./grafana/config.monitoring
+    networks:
+      - back-tier
+      - front-tier
+    restart: always
+
+  prometheus-bot:
+       #image: tienbm90/prometheus-bot:0.0.1
+       image: serg3091/prometheus_bot:v0.0.1
+       volumes:
+          - ./telegrambot/:/etc/telegrambot/
+          - ./telegrambot/config.yaml:/config.yaml  
+       ports:
+          - 9087:9087
+       networks:
+        - back-tier
+        - front-tier
+       restart: always
